@@ -1,11 +1,12 @@
-from collections import defulatdict
+from collections import defaultdict
+from itertools import zip_longest
 from glob import glob
 import os
 import pandas as pd
 import json
+import gzip
 
-from sge_submission import SgeWriter
-
+from .sge_writer import SgeWriter
 
 class CtgPipeline(object): 
     """Automates running CTG"""
@@ -43,24 +44,46 @@ class CtgPipeline(object):
         if not files: 
             raise RuntimeError("Did not find any files!")
 
-        self.grouped_files = defaultdict([])
+        # Categorizing files
+        grouped_files = defaultdict(lambda : [[], []]) # creating container for paired end reads
         jobs = []
         for fn in files:
-            arr = fn.split(delimiter)
+            base_filename = os.path.basename(fn.split('.')[0])
+            
+            arr = base_filename.split(delimiter)
             
             tpt = arr[tpt_index]
             rep = arr[rep_index]
-            self.grouped_files[(tpt, rep)].append(fn) 
+
+            if arr[read_index] == 'R1': 
+                grouped_files[(tpt, rep)][0].append(fn) 
+            elif arr[read_index] == 'R2': 
+                grouped_files[(tpt, rep)][1].append(fn)
+            else: 
+                raise RuntimeError("Encountered invalid read identifier (%s)" % arr[read_index])
 
             jobs.append(arr[job_index])
 
+        # Organizing reads 
+        for tup, fns in grouped_files.items(): 
+            a = sorted(fns[0]) 
+            b = sorted(fns[1])
 
+            for i,j in zip_longest(a,b): 
+                if edit_distance(i,j) != 1: 
+                    raise RuntimeError("Sorting did not yield perfect pairing of files")
+
+            grouped_files[tup] = [a,b]
+
+
+        jobs = set(jobs) 
+        if len(jobs) != 1: 
+            raise RuntimeError("Did not find only one job!")
+
+        self.grouped_files = dict(grouped_files)
         self.job = list(jobs)[0]
-        self.timepoint_prefix=timepoint_prefix
-        self.timepoints = sorted(list(timepoints))
-        self.replicates = sorted(list(replicates))
-        self.files = files
-        self.grouped_files = groups 
+        self.files = set(files)
+        self.timepoint_prefix = timepoint_prefix
 
         return self
 
@@ -76,39 +99,39 @@ class CtgPipeline(object):
 
         runners = self.grouped_files.copy()
 
-        for tpt, d1 in self.grouped_files.items(): 
-            for rep, d2 in d1.items():
-                full_job = f'{self.job}_{self.timepoint_prefix}{tpt}_{rep}'
+        for tup, files in self.grouped_files.items():
+            tpt, rep = tup 
+            full_job = f'{self.job}_{self.timepoint_prefix}{tpt}_{rep}'
 
-                newdir = os.path.join(self.working_directory, full_job) 
-                os.mkdir(newdir)
+            newdir = os.path.join(self.working_directory, full_job) 
+            os.mkdir(newdir)
 
-                c = CtgRunner(
-                    name=full_job,
-                    config_file=config_file,
-                    fastq_dir=fastq_dir, 
-                    fastq1=sorted(d2['R1']),
-                    fastq2=sorted(d2['R2']),
-                    output_directory=newdir,
-                    convert_to_realpaths=convert_to_realpaths,
-                )
+            c = CtgRunner(
+                name=full_job,
+                config_file=config_file,
+                fastq_dir=fastq_dir, 
+                fastq1=files[0],
+                fastq2=files[1],
+                output_directory=newdir,
+                convert_to_realpaths=convert_to_realpaths,
+            )
 
-                c.create_sge_scripts(
-                    script_out_path=os.path.join(newdir, 'job.sh'),
-                    job_name=self.job,
-                    working_dir_path=newdir, 
-                    memory=2,
-                    ncpus=16, 
-                    commands=[
-                        'conda activate ctg-dev', 
-                    ] 
-                )
+            c.create_sge_scripts(
+                script_out_path=os.path.join(newdir, 'job.sh'),
+                job_name=self.job,
+                working_dir_path=newdir, 
+                memory=2,
+                ncpus=16, 
+                commands=[
+                    'conda activate ctg-dev', 
+                ] 
+            )
 
-                if submit: 
-                    c.sge.submit_script()
-                    print("submitted!")
+            if submit: 
+                c.sge.submit_script()
+                print("submitted!")
 
-                runners[tpt][rep] = c
+            runners[tpt][rep] = c
 
         self.runners = runners
 
@@ -169,6 +192,19 @@ class CtgPipeline(object):
         }
 
         return json.dumps(state)
+
+    def create_test_set(self, test_dir = None, test_size=10000): 
+        if test_dir is None: 
+            test_dir = os.getcwd()
+
+        for f in self.files:
+            file_name = os.path.basename(f).split('.')[0]
+            with gzip.open(f) as r:
+                test_lines = [next(r) for _ in range(test_size)]
+            
+            with gzip.open(os.path.join(test_dir, f'{file_name}_test.fast.gz'), 'wb') as w: 
+                w.write('\n'.join(test_lines))
+            
 
 class CtgRunner(object): 
     """Object to create the ctg runner script
@@ -313,6 +349,9 @@ def pairwise(iterable):
     
     return zip(a, a)
 
+
+def edit_distance(str1, str2):
+    return sum([1 for i,j in zip_longest(str1, str2) if i != j])
 
 if __name__ == "__main__": 
     c = CtgRunner(

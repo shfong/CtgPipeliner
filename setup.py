@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 import re
 
 # Get version number 
-VERSIONFILE="nbgwas/version.py"
+VERSIONFILE="CtgPipeliner/version.py"
 verstrline = open(VERSIONFILE, "rt").read()
 VSRE = r"^__version__ = ['\"]([^'\"]*)['\"]"
 mo = re.search(VSRE, verstrline, re.M)
@@ -13,9 +13,8 @@ else:
     raise RuntimeError("Unable to find version string in %s." % (VERSIONFILE,))
 
 
-with open('README.rst') as readme_file:
+with open('README.md') as readme_file:
     readme = readme_file.read()
-
 
 setup(
     name='ctg-pipeliner',
@@ -25,7 +24,7 @@ setup(
     author='Samson Fong',
     author_email='shfong@ucsd.edu',
     license='MIT',
-    long_description=readme + '\n\n' + history,
+    long_description=readme,
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Science/Research',

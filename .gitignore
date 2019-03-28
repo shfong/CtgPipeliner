@@ -1,2 +1,7 @@
 __pycache__
 configs
+
+.cache/
+.eggs/
+.vscode/
+*.egg-info/
