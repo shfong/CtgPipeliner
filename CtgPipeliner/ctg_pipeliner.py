@@ -6,7 +6,7 @@ import pandas as pd
 import json
 import gzip
 
-from .sge_writer import SgeWriter
+from sge_writer import SgeWriter
 
 class CtgPipeline(object): 
     """Automates running CTG"""
@@ -26,14 +26,14 @@ class CtgPipeline(object):
         self.fastq_directory = fastq_directory
         self.working_directory = working_directory
 
-
+    
     def parse_files(
         self, 
         glob_pattern, 
         timepoint_prefix="", 
         delimiter="_", 
         job_index=0, 
-        tpt_index=1, 
+        tpt_index=1,
         rep_index=2, 
         read_index=3,
         datetime=False
@@ -48,11 +48,16 @@ class CtgPipeline(object):
         grouped_files = defaultdict(lambda : [[], []]) # creating container for paired end reads
         jobs = []
         for fn in files:
-            base_filename = os.path.basename(fn.split('.')[0])
+            base_filename = os.path.basename(fn)
+            base_filename = base_filename.split('.')[0]
             
             arr = base_filename.split(delimiter)
             
-            tpt = arr[tpt_index]
+            if isinstance(tpt_index, list):
+                tpt = '-'.join([arr[i] for i in tpt_index])
+            else:
+                tpt = arr[tpt_index]
+
             rep = arr[rep_index]
 
             if arr[read_index] == 'R1': 
@@ -97,8 +102,7 @@ class CtgPipeline(object):
         submit=False,
     ):
 
-        runners = self.grouped_files.copy()
-
+        runners = {}
         for tup, files in self.grouped_files.items():
             tpt, rep = tup 
             full_job = f'{self.job}_{self.timepoint_prefix}{tpt}_{rep}'
@@ -131,7 +135,7 @@ class CtgPipeline(object):
                 c.sge.submit_script()
                 print("submitted!")
 
-            runners[tpt][rep] = c
+            runners[tup] = c
 
         self.runners = runners
 
@@ -202,8 +206,8 @@ class CtgPipeline(object):
             with gzip.open(f) as r:
                 test_lines = [next(r) for _ in range(test_size)]
             
-            with gzip.open(os.path.join(test_dir, f'{file_name}_test.fast.gz'), 'wb') as w: 
-                w.write('\n'.join(test_lines))
+            with gzip.open(os.path.join(test_dir, f'{file_name}_test.fastq.gz'), 'wb') as w: 
+                w.write(b''.join(test_lines))
             
 
 class CtgRunner(object): 
@@ -342,6 +346,36 @@ class CtgRunner(object):
 
         return self
 
+    
+    def to_json(self, outpath=None):
+        state = self.__dict__.copy() 
+
+        if 'sge' in state:
+            state['sge'] = json.JSONDecoder().decode(state['sge'].to_json())
+
+        if outpath is not None: 
+            with open(outpath, 'w') as f: 
+                json.dump(state, f, indent=4, separators=(',', ':'))
+        
+        else: 
+            return json.dumps(state, indent=4, separators=(',', ':'))
+
+    @classmethod
+    def from_json(cls, json_path): 
+        with open(json_path) as f: 
+            state = json.load(f)
+
+        if 'sge' in state:
+            state['sge'] = SgeWriter.from_json(json_str=json.dumps(state['sge']))
+
+        print(state)
+        
+        obj = cls()
+        obj.__dict__.update(state)
+
+
+        return obj
+
 
 def pairwise(iterable):
     "s -> (s0, s1), (s2, s3), (s4, s5), ..."
@@ -361,24 +395,27 @@ if __name__ == "__main__":
         fastq2 = "MDA_D12_R1_S41_L001_R2_001.fastq.gz", 
     )
 
+    c.create_sge_scripts()
+    c.to_json('ctg_test.json')
+
     #print(c)
 
-    pipeline = CtgPipeline(
-        fastq_directory="../data/testset",
-        working_directory='test' 
-    )
+    # pipeline = CtgPipeline(
+    #     fastq_directory="../data/testset",
+    #     working_directory='test' 
+    # )
 
-    pipeline.parse_files(
-        "MDA_D*",
-        timepoint_prefix='D', 
-        read_index=5
-    )
+    # pipeline.parse_files(
+    #     "MDA_D*",
+    #     timepoint_prefix='D', 
+    #     read_index=5
+    # )
 
-    pipeline.construct_runners(
-        config_file='configs/config.txt', 
-        submit=False,
-    )
+    # pipeline.construct_runners(
+    #     config_file='configs/config.txt', 
+    #     submit=False,
+    # )
 
     # pipeline.aggregate_counts()
     
-    print(pipeline.to_json())
+    #print(pipeline.to_json())

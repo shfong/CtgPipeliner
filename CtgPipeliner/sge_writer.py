@@ -183,7 +183,7 @@ class SgeWriter(object):
 
         self._status = 'killed'
 
-    def to_json(self): 
+    def to_json(self, outpath=None): 
         state = {
             'job_name': self.__dict__.get('job_name', ''),
             'stdout_path': self.__dict__.get('stdout_path', '') ,
@@ -195,18 +195,38 @@ class SgeWriter(object):
             'commands': self.__dict__.get('commands', []),
             'verbose': self.__dict__.get('verbose', None), 
             'status': self.status,  
-
         }
 
-        json.dumps(state)
+        if outpath is not None: 
+            with open(outpath, 'w') as f: 
+                json.dump(state, f, indent=4, separators=(',', ':'))
 
+        else: 
+            return json.dumps(state, indent=4, separators=(',', ':'))
+
+    @classmethod
+    def from_json(cls, json_path=None, json_str=None): 
+        if sum([1 for i in  [json_path, json_str] if i is None]) != 1: 
+            raise ValueError("Can only take either json_path or json_str")
+
+        if json_path is not None: 
+            with open(json_path) as f: 
+                state = json.load(f)
+
+        if json_str is not None: 
+            state = json.loads(json_str)
+        
+        obj = cls()
+        obj.__dict__.update(state)
+
+        return obj
 
 if __name__ == "__main__": 
     sge = SgeWriter(
         job_name='MDA',
         stderr_path='test', 
         stdout_path='test', 
-        validate_paths=True, 
+        validate_paths=False, 
     )
 
     sge.commands = [
@@ -215,6 +235,6 @@ if __name__ == "__main__":
     print(sge)
     sge.write_script('test_out.sh')
 
-    sge.submit_script()
+    #sge.submit_script()
 
-    
+    sge.to_json(outpath='test.sh') 
